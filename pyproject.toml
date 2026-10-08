@@ -1,0 +1,161 @@
+[project]
+name = "git-wt"
+version = "0.5.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Brandon Norick", email = "b.norick@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "cyclopts>=4.19.0",
+    "duct>=1.0.1",
+    "minilog>=2.3.1",
+    "python-daemon>=3.1.2",
+    "rich>=15.0.0",
+    "textual>=8.2.7",
+]
+
+[project.scripts]
+git-wt = "git_wt.app.cli:run"
+
+[dependency-groups]
+dev = [
+    "deptry>=0.25.1",
+    "pytest>=8.0",
+    "ruff>=0.15.20",
+    "ty>=0.0.55",
+]
+
+[tool.pytest.ini_options]
+cache_dir = ".cache/pytest"
+testpaths = ["tests"]
+
+[tool.ruff]
+cache-dir = ".cache/ruff"
+line-length = 120
+target-version = "py314"
+
+[tool.ruff.lint]
+select = [
+    # flake8-2020
+    "YTT",
+    # flake8-bandit
+    "S",
+    # flake8-bugbear
+    "B",
+    # flake8-builtins
+    "A",
+    # flake8-comprehensions
+    "C4",
+    # flake8-debugger
+    "T10",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+    # mccabe
+    "C90",
+    # pycodestyle
+    "E", "W",
+    # pyflakes
+    "F",
+    # pygrep-hooks
+    "PGH",
+    # pyupgrade
+    "UP",
+    # ruff
+    "RUF",
+    # tryceratops
+    "TRY",
+]
+ignore = [
+    # Public APIs intentionally retain the established `dir` and `input` keyword names.
+    "A002",
+    # LineTooLong
+    "E501",
+    # DoNotAssignLambda
+    "E731",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = [
+    # __all__ is grouped by category, not alphabetically
+    "RUF022",
+]
+"src/git_wt/app/console.py" = [
+    # print() intentionally shadows builtin (writes to stderr)
+    "A001",
+    # The step runner keeps its three output modes together for readability.
+    "C901",
+]
+"src/git_wt/app/errors.py" = [
+    # exit() intentionally shadows builtin (styled exit helper)
+    "A001",
+]
+"_worktree.py" = [
+    # Parsing and fuzzy resolution are clearer as single sequential operations.
+    "C901",
+    # User-facing resolution errors are constructed with their local context.
+    "TRY003",
+]
+"src/git_wt/add.py" = [
+    # The add flows intentionally keep their sequential decision trees together.
+    "C901",
+    # This is an intentional picker icon, not a mathematical plus sign.
+    "RUF001",
+]
+"src/git_wt/doctor.py" = ["C901"]
+"src/git_wt/list.py" = ["TRY003"]
+"src/git_wt/man.py" = ["C901"]
+"src/git_wt/migrate.py" = [
+    # Migration steps are transactional workflows with shared rollback state.
+    "C901",
+    # Cleanup must happen before returning from the guarded operation.
+    "TRY300",
+]
+"src/git_wt/preview.py" = ["C901"]
+"src/git_wt/remove.py" = ["C901"]
+"src/git_wt/status.py" = ["C901"]
+"src/git_wt/update.py" = [
+    # Update is a deliberately sequential multi-worktree transaction.
+    "C901",
+    # This is an intentional status glyph, not an arithmetic minus sign.
+    "RUF001",
+    # User-facing safety errors are constructed with local branch/worktree context.
+    "TRY003",
+    "TRY300",
+]
+"src/git_wt/app/cli/__init__.py" = [
+    # Command modules load after the Cyclopts application is created.
+    "E402",
+    # Passthrough invokes the installed git executable with an argument list.
+    "S606",
+    "S607",
+]
+"src/git_wt/_hooks.py" = [
+    # Hook commands intentionally run through the shell and are user-configured.
+    "S603",
+    "S607",
+    # Hook failure messages need the exact config key and command.
+    "TRY003",
+]
+"src/git_wt/app/cli/init.py" = [
+    # Unsupported shell input is rejected with actionable usage context.
+    "TRY003",
+]
+"tests/*" = [
+    # Use of assert detected
+    "S101",
+]
+
+[tool.deptry]
+known_first_party = ["git_wt"]
+ignore_notebooks = true
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["minilog", "python-daemon"]
+
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12.0"]
+build-backend = "uv_build"

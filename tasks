@@ -1,0 +1,61 @@
+#!/usr/bin/env -S uvx --from=rust-just just --justfile
+
+package := "git_wt"
+package_dir := "src" / package
+
+just := "just --justfile " + justfile()
+
+# List all supported project commands and their usage.
+@default:
+    {{ just }} --list
+
+# Run a uv command for environment, lockfile, or build management.
+@uv *args='':
+    uv $@
+
+# Check dependency declarations; additional deptry arguments are forwarded.
+deptry *args:
+    @printf '\n#### DEPTRY\n'
+    uv run deptry --config pyproject.toml {{package_dir}} tests {{args}}
+
+# Run Ruff lint checks; use `ruff fix` to apply safe fixes.
+ruff action="check" *args:
+    @printf '\n#### RUFF\n'
+    uv run ruff check {{package_dir}} tests {{ if action == "fix" {"--fix"} else {"--output-format=full --no-fix"} }} {{args}}
+
+# Type-check the application and tests; additional ty arguments are forwarded.
+ty *args:
+    @printf '\n#### TY\n'
+    uv run ty check {{package_dir}} tests {{args}}
+
+# Format source and tests; use `format check` to verify without modifying files.
+format action="write" *args:
+    @printf '\n#### FORMAT\n'
+    uv run ruff format {{package_dir}} tests {{ if action == "check" {"--check"} else {""} }} {{args}}
+
+# Apply all automatic lint and formatting fixes.
+fix:
+    {{ just }} ruff fix
+    {{ just }} format
+
+# Run the unit test suite; additional pytest arguments are forwarded.
+test *args:
+    @printf '\n#### TEST\n'
+    uv run pytest {{args}}
+
+# Run the complete, non-mutating quality gate.
+check:
+    {{ just }} deptry
+    {{ just }} ruff
+    {{ just }} format check
+    {{ just }} ty
+    {{ just }} test
+
+# Remove the local virtual environment; run `uv sync --dev` to recreate it.
+clean:
+    rm -rf .venv
+
+# Run a one-off command in the project environment; add recurring verification to this file instead.
+[no-exit-message]
+run command *args:
+    @uv run {{command}} {{args}}
