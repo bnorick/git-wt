@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import shutil
 from pathlib import Path
 
@@ -40,11 +39,6 @@ def _relativize(output: str, repo_root: Path) -> str:
     return "".join(result)
 
 
-def _normalize_columns(output: str) -> str:
-    """Normalize Git's version-dependent list alignment separators."""
-    return "\n".join(re.sub(r"\s+", " ", line).rstrip() for line in output.splitlines())
-
-
 def test_list_shows_relative_paths(wt, bare_repo):
     """list output uses paths relative to the repo root."""
     r = wt("list", cwd=bare_repo / "main")
@@ -63,7 +57,7 @@ def test_list_passes_through_detached_worktrees(wt, bare_repo):
     expected = _relativize(native, bare_repo)
     r = wt("list", cwd=bare_repo / "main")
     assert r.returncode == 0
-    assert _normalize_columns(r.stdout) == _normalize_columns(expected)
+    assert r.stdout == expected
 
 
 def test_list_works_from_worktree_subdirectory(wt, bare_repo):
@@ -77,7 +71,7 @@ def test_list_works_from_worktree_subdirectory(wt, bare_repo):
     expected = _relativize(native, bare_repo)
     r = wt("list", cwd=subdir)
     assert r.returncode == 0
-    assert _normalize_columns(r.stdout) == _normalize_columns(expected)
+    assert r.stdout == expected
 
 
 def test_list_debug_mode_does_not_suppress_output(wt, bare_repo):
@@ -89,7 +83,7 @@ def test_list_debug_mode_does_not_suppress_output(wt, bare_repo):
     expected = _relativize(native, bare_repo)
     r = wt("list", cwd=bare_repo / "main", env={"DEBUG": "1"})
     assert r.returncode == 0
-    assert _normalize_columns(r.stdout) == _normalize_columns(expected)
+    assert r.stdout == expected
 
 
 def test_list_json_outputs_structured_entries(wt, bare_repo):

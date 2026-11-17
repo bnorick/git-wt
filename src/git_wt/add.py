@@ -97,17 +97,12 @@ def run(
 
 
 def _run_from_local(worktree: str, source_branch: str) -> None:
-    if not worktree:
-        console.error("A worktree name is required with --from-local")
-        sys.exit(1)
-
-    destination = Path(worktree)
-    if destination.is_absolute():
+    if Path(worktree).is_absolute():
         console.error("--from-local requires a repo-relative worktree name so it can also name the new branch")
         sys.exit(1)
 
-    new_branch = str(destination)
-    _validate_worktree_name(destination)
+    if worktree:
+        _validate_worktree_name(worktree)
 
     if not source_branch:
         try:
@@ -142,7 +137,7 @@ def _run_from_local(worktree: str, source_branch: str) -> None:
                 items=items,
                 multi=False,
                 prompt="branch> ",
-                header=f"Select local branch to base {new_branch} on",
+                header=f"Select local branch to base {worktree} on" if worktree else "Select local branch to check out",
                 preview_cmd=branch_preview_cmd(sys.argv[0]),
             )
         )
@@ -153,6 +148,11 @@ def _run_from_local(worktree: str, source_branch: str) -> None:
     if not _git.query_ok("show-ref", "--verify", "--quiet", f"refs/heads/{source_branch}"):
         console.error(f"Local branch not found: {source_branch}")
         sys.exit(1)
+
+    worktree = worktree or source_branch
+    destination = Path(worktree)
+    new_branch = str(destination)
+    _validate_worktree_name(destination)
 
     try:
         bare_root = _worktree.bare_root()
@@ -168,7 +168,10 @@ def _run_from_local(worktree: str, source_branch: str) -> None:
     )
 
     def _create() -> None:
-        _git.run_to_stderr("worktree", "add", "-b", new_branch, str(wt_abs), source_branch)
+        if new_branch == source_branch:
+            _git.run_to_stderr("worktree", "add", str(wt_abs), source_branch)
+        else:
+            _git.run_to_stderr("worktree", "add", "-b", new_branch, str(wt_abs), source_branch)
         _fsutil.relativize_worktree_gitdir(wt_abs)
 
     _run_add_hooks(wt_abs, new_branch, _create)

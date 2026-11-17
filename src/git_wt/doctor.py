@@ -138,11 +138,6 @@ def _check_wt_path(entry: _worktree.Entry) -> Check:
 
 
 def _check_migration_ready(root: Path, checks: list[Check]) -> None:
-    # No submodules
-    if (root / ".gitmodules").exists():
-        checks.append(Check("Migration readiness", "warn", "has submodules — migration not supported"))
-        return
-
     # Single worktree only
     try:
         out = _git.query("worktree", "list", "--porcelain")

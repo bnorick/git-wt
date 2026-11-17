@@ -116,7 +116,7 @@ Aliased as `new`.
 | `--reason` | str | — | Lock reason (use with `--lock`). |
 | `--no-checkout` | flag | `false` | Don't populate the worktree's files. |
 | `--from-remote` | flag | `false` | Fetch remotes and pick a branch; the path is auto-derived from the branch name. |
-| `--from-local [BRANCH]` | optional str | — | Create the new worktree and branch from a selected local branch, or use `BRANCH` directly. |
+| `--from-local [BRANCH]` | optional str | — | Pick a local branch (or specify `BRANCH`). `WORKTREE` defaults to the branch name; a different name creates a new branch from it. |
 
 Worktree names cannot contain spaces.
 
@@ -202,6 +202,36 @@ migration readiness for standard repos.
 `git wt migrate` — convert an existing standard repository in-place to the bare
 worktree layout. Use the global `--dry-run` to preview first.
 
+Use `git wt migrate --fast` to register the current worktree without checking
+out its files, then rename the original top-level contents into it. This avoids
+copying or checksumming working files, caches, and virtual environments while
+preserving the repository root directory and the shell's current directory.
+The staging directory and repository must be on the same filesystem. A different
+default branch still needs its own checkout.
+
+**Fast mode has no rollback.** Failure or interruption can leave original files
+split between the repository and sibling `NAME-new-PID` / `NAME-backup-PID`
+directories. Before moving files, migration displays the exact recovery paths
+and a dotfile-aware move command for failures during the initial content moves.
+The notice disappears after success in an interactive terminal and remains in
+redirected logs. These directories are retained on failure; inspect all of them
+with `ls -la` before retrying or deleting anything. Later failures can also require
+restoring the index and submodule metadata; the initial move command alone does
+not undo those changes. Prefer this mode for fresh clones or
+repositories whose contents you can recover. Without `--fast`, migration keeps
+its existing copy-based behavior. `--dry-run --fast` only previews the plan.
+
+Migration preserves initialized and nested submodules in the current branch's
+worktree, including local commits, staged changes, untracked files, and module
+configuration. Deinitialized module stores are preserved too. Submodule links
+remain relative so the whole repository directory can be moved. External or
+linked Git metadata in nested repositories is rejected before migration.
+
+New worktrees created by `clone` or `add` require `git submodule update --init
+--recursive` from inside the worktree to populate submodules. The `move`
+passthrough retains Git's restriction on moving worktrees containing submodules;
+removing an initialized submodule worktree requires `remove --force`.
+
 ### `completion`
 
 `git wt completion [SHELL]` — print a shell completion script. `SHELL` is one of
@@ -253,6 +283,10 @@ git wt add bnorick/spike
 
 # Interactively pick a remote branch, deriving the path from the branch name
 git wt add --from-remote
+
+# Check out a selected local branch in a directory matching its name
+git wt add --from-local
+git wt add --from-local bnorick/tools-copy
 
 # Create bnorick/spike from a selected local branch, or directly from local main
 git wt add bnorick/spike --from-local

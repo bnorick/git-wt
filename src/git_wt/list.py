@@ -160,5 +160,5 @@ def _relativize(
             result.append(row)
         else:
             path, info = row
-        result.append(f"{path:<{max_width}}  {info}" if info else path)
+            result.append(f"{path:<{max_width}}  {info}" if info else path)
     return "\n".join(result) + "\n"

@@ -43,7 +43,7 @@ def add(
             name="--from-local",
             consume_multiple=(0, 1),
             show_default=False,
-            help="Create the new branch from a selected local branch, or name the source branch directly",
+            help="Pick or specify a local branch; worktree path defaults to the branch name",
         ),
     ] = None,
 ) -> None:
@@ -60,9 +60,10 @@ def add(
     Run without arguments for interactive selection, or pass a path and
     commitish directly (git wt add feature origin/feature). Use -b/-B to
     create or reset a branch (git wt add -b new-feature main), or
-    --detach to check out a detached HEAD. Use --from-local with a
-    repo-relative worktree name to select a local starting branch, or pass
-    that source branch directly after the option.
+    --detach to check out a detached HEAD. Use --from-local to pick a local
+    branch, or pass that branch directly after the option. The worktree path
+    defaults to the branch name. Pass a different repo-relative worktree name
+    to create a new branch from the selected branch.
     """
     action.run(
         worktree,
