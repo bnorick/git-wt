@@ -9,6 +9,7 @@ from pathlib import Path
 from conftest import create_branch, create_worktree, git
 
 from git_wt import _worktree
+from git_wt.list import _relativize as _relativize_list
 from git_wt.list import _sanitize_human, _sanitize_porcelain
 
 
@@ -26,7 +27,7 @@ def _has_prunable_annotation(output: str) -> bool:
 
 def _relativize(output: str, repo_root: Path) -> str:
     """Strip repo_root prefix from each path line in git worktree list output."""
-    prefix = str(repo_root) + "/"
+    prefix = repo_root.as_posix() + "/"
     lines = output.splitlines(keepends=True)
     result = []
     for line in lines:
@@ -46,6 +47,13 @@ def test_list_shows_relative_paths(wt, bare_repo):
     assert str(bare_repo) not in r.stdout
     assert ".bare" in r.stdout
     assert "main" in r.stdout
+
+
+def test_relativize_preserves_native_separator_width():
+    """Re-alignment keeps the separator width used by the local Git version."""
+    native = "/repo/.bare        (bare)\n/repo/detached-wt  abc1234 (detached HEAD)\n"
+
+    assert _relativize_list(native, "/repo/") == (".bare        (bare)\ndetached-wt  abc1234 (detached HEAD)\n")
 
 
 def test_list_passes_through_detached_worktrees(wt, bare_repo):
