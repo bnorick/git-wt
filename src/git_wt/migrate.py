@@ -80,7 +80,7 @@ def run(*, dry_run: bool, fast: bool = False) -> None:
     new_structure = plan.parent_dir / f"{plan.repo_name}-new-{pid}"
     temp_backup = plan.parent_dir / f"{plan.repo_name}-backup-{pid}"
 
-    with _cleanup_guard(new_structure, temp_backup, preserve_on_error=fast):
+    with _cleanup_guard(new_structure, temp_backup, root=plan.repo_root, preserve_on_error=fast):
         _build_migrated(plan, new_structure, fast=fast)
         if fast:
             with console.temporary_notice(_fast_recovery_notice(plan, new_structure, temp_backup)):
@@ -463,7 +463,7 @@ def _restore_nested_repos(plan: _Plan, wt_path: Path, *, move: bool = False) -> 
         if not move and src.is_dir():
             _fsutil.copy_dir(src, dst)
         else:
-            dst.write_text(f"gitdir: {os.path.relpath(git_dir, dst.parent)}\n")
+            _fsutil.write_pointer(dst, f"gitdir: {os.path.relpath(git_dir, dst.parent)}\n")
 
     # Include deinitialized modules: their stores still contain local history.
     configs = list((admin / "modules").rglob("config")) if (admin / "modules").is_dir() else []
@@ -624,6 +624,19 @@ def _fast_recovery_notice(plan: _Plan, new_dir: Path, temp_backup: Path) -> str:
     )
 
 
+def _remove_migration_path(path: Path, root: Path, *, ignore_errors: bool = False) -> None:
+    """Remove a migration staging/backup sibling, refusing anything else."""
+    if path.parent.resolve() != root.parent.resolve():
+        raise ValueError(f"refusing to remove path outside repository parent: {path}")
+    if path.resolve() == root.resolve():
+        raise ValueError(f"refusing to remove repository root: {path}")
+    allowed_prefixes = tuple(f"{root.name}-{kind}-" for kind in ("new", "backup"))
+    prefix = next((candidate for candidate in allowed_prefixes if path.name.startswith(candidate)), None)
+    if prefix is None or not path.name.removeprefix(prefix).isdecimal():
+        raise ValueError(f"refusing to remove unexpected migration path: {path}")
+    _fsutil.rmtree(path, ignore_errors=ignore_errors)
+
+
 def _finalize_fast(plan: _Plan, new_dir: Path, temp_backup: Path) -> None:
     """Adopt original files with renames, preserving the root inode, without rollback."""
     root = plan.repo_root
@@ -649,7 +662,10 @@ def _finalize_fast(plan: _Plan, new_dir: Path, temp_backup: Path) -> None:
     _repair_worktree_paths(root)
     _git.query("rev-parse", "--show-toplevel", dir=root / plan.current_branch)
     new_dir.rmdir()
-    shutil.rmtree(temp_backup)
+    try:
+        _remove_migration_path(temp_backup, root)
+    except OSError as exc:
+        console.warn(f"Migration completed, but backup cleanup failed: {exc}. Remove {temp_backup} manually.")
 
 
 def _finalize(plan: _Plan, new_dir: Path, temp_backup: Path) -> None:
@@ -703,10 +719,12 @@ def _finalize(plan: _Plan, new_dir: Path, temp_backup: Path) -> None:
     _repair_worktree_paths(root)
 
     # Cleanup
-    if new_dir.exists():
-        shutil.rmtree(str(new_dir), ignore_errors=True)
-    if temp_backup.exists():
-        shutil.rmtree(str(temp_backup), ignore_errors=True)
+    for leftover in (new_dir, temp_backup):
+        if leftover.exists():
+            try:
+                _remove_migration_path(leftover, root)
+            except OSError as exc:
+                console.warn(f"Migration completed, but cleanup failed for {leftover}: {exc}. Remove it manually.")
 
 
 def _repair_worktree_paths(root: Path) -> None:
@@ -725,8 +743,8 @@ def _repair_worktree_paths(root: Path) -> None:
         if not new_wt_path.is_dir():
             continue
         # Write absolute paths first so relativize_worktree_gitdir can find the admin dir.
-        (wt_admin / "gitdir").write_text(str(new_wt_path / ".git") + "\n")
-        (new_wt_path / ".git").write_text(f"gitdir: {wt_admin}\n")
+        _fsutil.write_pointer(wt_admin / "gitdir", str(new_wt_path / ".git") + "\n")
+        _fsutil.write_pointer(new_wt_path / ".git", f"gitdir: {wt_admin}\n")
         _fsutil.relativize_worktree_gitdir(new_wt_path)
 
 
@@ -736,7 +754,7 @@ def _repair_worktree_paths(root: Path) -> None:
 
 
 @contextmanager
-def _cleanup_guard(new_dir: Path, temp_backup: Path, *, preserve_on_error: bool = False):
+def _cleanup_guard(new_dir: Path, temp_backup: Path, *, root: Path, preserve_on_error: bool = False):
     success = False
     original_sigint = signal.getsignal(signal.SIGINT)
     original_sigterm = signal.getsignal(signal.SIGTERM)
@@ -751,10 +769,14 @@ def _cleanup_guard(new_dir: Path, temp_backup: Path, *, preserve_on_error: bool 
                 f"Fast migration did not complete; no rollback performed. Inspect {new_dir} and {temp_backup} as well as the repository; original files may be split between them. No failure cleanup was performed."
             )
             return
-        if new_dir.exists():
-            shutil.rmtree(str(new_dir), ignore_errors=True)
-        if temp_backup.exists():
-            shutil.rmtree(str(temp_backup), ignore_errors=True)
+        for leftover in (new_dir, temp_backup):
+            if not leftover.exists():
+                continue
+            try:
+                _remove_migration_path(leftover, root, ignore_errors=True)
+            except (OSError, ValueError) as exc:
+                # Never mask the failure that triggered cleanup.
+                console.warn(f"Failure cleanup could not remove {leftover}: {exc}")
 
     signal.signal(signal.SIGINT, _cleanup)
     signal.signal(signal.SIGTERM, _cleanup)

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import locale
 import os
 import shutil
 import stat
+import sys
+import tempfile
 from contextlib import suppress
 from pathlib import Path
 from typing import NamedTuple
@@ -21,6 +24,24 @@ def _rmtree(path: Path) -> None:
         func(target)
 
     shutil.rmtree(str(path), onexc=_clear_and_retry)
+
+
+def symlinks_supported() -> bool:
+    """Return whether this process may create symlinks in a temp directory."""
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "target"
+        target.write_text("target\n")
+        try:
+            (Path(tmp) / "link").symlink_to(target)
+        except OSError:
+            return False
+    return True
+
+
+requires_symlinks = pytest.mark.skipif(
+    sys.platform == "win32" and not symlinks_supported(),
+    reason="creating symlinks requires Windows developer mode or elevation",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -51,8 +72,17 @@ class CommandResult(NamedTuple):
 
 
 def _decode_output(output: bytes | None) -> str:
-    """Decode captured command output with text-mode newline handling."""
-    return (output or b"").decode().replace("\r\n", "\n").replace("\r", "\n")
+    """Decode captured command output with text-mode newline handling.
+
+    Piped Windows output uses the console code page rather than UTF-8, so fall
+    back to the locale encoding instead of failing on non-ASCII progress glyphs.
+    """
+    data = output or b""
+    try:
+        text = data.decode()
+    except UnicodeDecodeError:
+        text = data.decode(locale.getpreferredencoding(False), errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def git(

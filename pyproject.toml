@@ -99,6 +99,10 @@ ignore = [
     # User-facing resolution errors are constructed with their local context.
     "TRY003",
 ]
+"_fsutil.py" = [
+    # Deletion refusals must name the exact path that was rejected.
+    "TRY003",
+]
 "src/git_wt/add.py" = [
     # The add flows intentionally keep their sequential decision trees together.
     "C901",
@@ -113,6 +117,8 @@ ignore = [
     "C901",
     # Cleanup must happen before returning from the guarded operation.
     "TRY300",
+    # Deletion refusals must name the exact path that was rejected.
+    "TRY003",
 ]
 "src/git_wt/preview.py" = ["C901"]
 "src/git_wt/remove.py" = ["C901"]

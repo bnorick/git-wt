@@ -12,6 +12,7 @@ from conftest import (
     git,
     linked_worktree_count,
     make_std_repo,
+    requires_symlinks,
 )
 
 
@@ -289,6 +290,7 @@ def test_migrate_preserves_multiple_remotes(wt, tmp_path):
     assert str(upstream) in upstream_url
 
 
+@requires_symlinks
 def test_migrate_preserves_symlinks(wt, tmp_path):
     """Symlinks in the working directory survive migration."""
     import os
@@ -377,6 +379,68 @@ def test_migrate_preserves_repo_inode(wt, tmp_path, fast):
     assert inode_after == inode_before
 
 
+@pytest.mark.parametrize("fast", [False, True])
+def test_migrate_cleans_up_sibling_directories(wt, tmp_path, fast):
+    """Successful migration leaves no staging or backup directories behind."""
+    repo = make_std_repo(tmp_path / "repo")
+
+    wt("migrate", *(["--fast"] if fast else []), cwd=repo, input="y\n")
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["repo"]
+
+
+class TestRemoveMigrationPath:
+    @pytest.fixture
+    def repo(self, tmp_path):
+        root = tmp_path / "repo"
+        root.mkdir()
+        return root
+
+    @pytest.mark.parametrize("kind", ["new", "backup"])
+    def test_removes_expected_sibling(self, repo, kind):
+        from git_wt import migrate
+
+        path = repo.parent / f"repo-{kind}-1234"
+        path.mkdir()
+        (path / "leftover").write_text("content\n")
+
+        migrate._remove_migration_path(path, repo)
+
+        assert not path.exists()
+        assert repo.is_dir()
+
+    @pytest.mark.parametrize("name", ["repo-new-x", "repo-backup-123x", "repo-1234", "other-new-1234"])
+    def test_refuses_unexpected_names(self, repo, name):
+        from git_wt import migrate
+
+        path = repo.parent / name
+        path.mkdir()
+
+        with pytest.raises(ValueError, match="unexpected migration path"):
+            migrate._remove_migration_path(path, repo, ignore_errors=True)
+
+        assert path.is_dir()
+
+    def test_refuses_repository_root(self, repo):
+        from git_wt import migrate
+
+        with pytest.raises(ValueError, match="repository root"):
+            migrate._remove_migration_path(repo, repo)
+
+        assert repo.is_dir()
+
+    def test_refuses_path_outside_repository_parent(self, repo):
+        from git_wt import migrate
+
+        path = repo.parent / "elsewhere" / "repo-new-1234"
+        path.mkdir(parents=True)
+
+        with pytest.raises(ValueError, match="outside repository parent"):
+            migrate._remove_migration_path(path, repo)
+
+        assert path.is_dir()
+
+
 def test_migrate_fails_with_sparse_checkout(wt, tmp_path):
     """migrate blocks when sparse checkout is enabled."""
     repo = make_std_repo(tmp_path / "repo")
@@ -419,6 +483,7 @@ def test_migrate_preserves_module_metadata(wt, tmp_path, deinitialized, fast):
     git("status", cwd=sub)
 
 
+@requires_symlinks
 def test_fast_migrate_preserves_original_files_and_index(wt, tmp_path):
     repo = make_std_repo(tmp_path / "repo", branch="feature/topic")
     git("branch", "main", cwd=repo)
@@ -487,7 +552,7 @@ def test_fast_migrate_failure_keeps_moved_files(tmp_path, monkeypatch):
         return original_rename(path, target)
 
     monkeypatch.setattr(Path, "rename", fail_after_first_move)
-    with pytest.raises(OSError), migrate._cleanup_guard(staging, backup, preserve_on_error=True):
+    with pytest.raises(OSError), migrate._cleanup_guard(staging, backup, root=repo, preserve_on_error=True):
         migrate._finalize_fast(plan, staging, backup)
 
     assert (staging / "main" / moved[0]).exists()
