@@ -4,12 +4,24 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 from contextlib import suppress
 from pathlib import Path
 from typing import NamedTuple
 
 import duct
 import pytest
+
+
+def _rmtree(path: Path) -> None:
+    """Remove a tree, clearing the read-only bit Git sets on Windows objects."""
+
+    def _clear_and_retry(func, target, _error):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    shutil.rmtree(str(path), onexc=_clear_and_retry)
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -158,7 +170,7 @@ def make_bare_repo(path: Path, branch: str = "main") -> Path:
     git("fetch", "--all", cwd=bare)
 
     # Remove tmp source now that refs are populated
-    shutil.rmtree(str(tmp))
+    _rmtree(tmp)
 
     git("worktree", "add", str(path / branch), branch, cwd=bare)
 
@@ -172,7 +184,7 @@ def make_bare_repo_with_remote(path: Path, branch: str = "main") -> tuple[Path, 
     tmp = path.parent / f".tmp-{path.name}"
     make_std_repo(tmp, branch=branch)
     git("clone", "--bare", str(tmp), str(origin_path))
-    shutil.rmtree(str(tmp))
+    _rmtree(tmp)
 
     # Create the bare repo, pointing at origin
     path.mkdir(parents=True, exist_ok=True)
@@ -259,7 +271,7 @@ def wt_bare_repo_with_remote(wt, tmp_path) -> tuple[Path, Path]:
     std = make_std_repo(tmp_path / "src")
     origin = tmp_path / "origin"
     git("clone", "--bare", str(std), str(origin))
-    shutil.rmtree(str(std))
+    _rmtree(std)
     target = tmp_path / "repo"
     wt("clone", str(origin), str(target))
     return target, origin
