@@ -28,7 +28,7 @@ def run(*extra_args: str) -> int:
     if "--json" in extra_args:
         try:
             root = _worktree.bare_root()
-            prefix = str(root) + "/"
+            prefix = root.as_posix() + "/"
         except Exception:
             prefix = None
 
@@ -41,7 +41,7 @@ def run(*extra_args: str) -> int:
 
     try:
         root = _worktree.bare_root()
-        prefix = str(root) + "/"
+        prefix = root.as_posix() + "/"
         targets = _worktree.gitdir_targets()
     except Exception:
         prefix = None
@@ -137,6 +137,7 @@ def _relativize(
     # Non-porcelain: git aligns columns to the longest absolute path.
     # Re-parse all lines into (path, info), shorten prefix lines, then re-align.
     rows: list[tuple[str, str] | str | None] = []
+    separator_width: int | None = None
     for line in lines:
         if not line:
             rows.append(None)
@@ -145,13 +146,19 @@ def _relativize(
             rows.append(line)
             continue
         raw_path = _listed_path(line, targets or {})
-        info = line[len(raw_path) :].strip()
+        rest = line[len(raw_path) :]
+        info = rest.strip()
+        if info:
+            spaces = len(rest) - len(rest.lstrip(" "))
+            if separator_width is None or spaces < separator_width:
+                separator_width = spaces
         rows.append((_clean_path(raw_path, prefix), info))
 
     max_width = max(
         (len(r[0]) for r in rows if isinstance(r, tuple)),
         default=0,
     )
+    separator = " " * (separator_width if separator_width is not None else 1)
     result = []
     for row in rows:
         if row is None:
@@ -160,5 +167,5 @@ def _relativize(
             result.append(row)
         else:
             path, info = row
-            result.append(f"{path:<{max_width}}  {info}" if info else path)
+            result.append(f"{path:<{max_width}}{separator}{info}" if info else path)
     return "\n".join(result) + "\n"

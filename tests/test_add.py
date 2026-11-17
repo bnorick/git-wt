@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from conftest import (
     _parse_worktree_blocks,
@@ -43,7 +43,7 @@ def test_add_relative_path_resolved(wt, bare_repo):
     r = wt("add", "-b", "feature", "feature", cwd=bare_repo / "main")
     # stdout should be absolute even when we passed a relative path
     stdout = r.stdout.strip()
-    assert stdout.startswith("/")
+    assert Path(stdout).is_absolute()
     assert Path(stdout).is_dir()
 
 
@@ -294,6 +294,23 @@ def test_add_branch_name_with_slashes(wt, bare_repo):
     assert r.returncode == 0
     assert_branch_exists(bare_repo / ".bare", "feature/nested/branch")
     assert (bare_repo / "feat-nested").is_dir()
+
+
+def test_add_namespaced_path_derives_namespaced_branch(wt, bare_repo):
+    """A multi-component path derives a slash-separated branch name."""
+    r = wt("add", "bnorick/test-worktree", cwd=bare_repo / "main")
+    assert r.returncode == 0
+    assert (bare_repo / "bnorick" / "test-worktree").is_dir()
+    assert_branch_exists(bare_repo / ".bare", "bnorick/test-worktree")
+
+
+def test_default_branch_preserves_slashes_for_windows_paths(monkeypatch):
+    """Auto-derived branch names stay slash-separated under Windows path semantics."""
+    from git_wt import add as add_action
+
+    monkeypatch.setattr(add_action, "Path", PureWindowsPath)
+
+    assert add_action._default_branch("bnorick/poe-trade-api") == "bnorick/poe-trade-api"
 
 
 def test_add_lock_flag(wt, bare_repo):
