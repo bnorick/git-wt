@@ -94,7 +94,7 @@ wheels = [
 
 [[package]]
 name = "git-wt"
-version = "0.4.1"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "cyclopts" },

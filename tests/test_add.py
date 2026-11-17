@@ -541,3 +541,38 @@ def test_add_from_local_rejects_unknown_source_branch(wt, bare_repo):
     assert r.returncode == 1
     assert "Local branch not found: missing-branch" in r.stderr
     assert not (bare_repo / "new-worktree").exists()
+
+
+def test_add_from_local_picker_checks_out_matching_branch(wt, bare_repo):
+    """Selecting the branch named by the worktree reuses that branch."""
+    branch = "bnorick/tools-copy"
+    git("branch", branch, "main", cwd=bare_repo / ".bare")
+
+    r = wt("add", branch, "--from-local", cwd=bare_repo / "main", select=branch)
+
+    assert r.stdout.strip() == str(bare_repo / branch)
+    assert_worktree_exists(bare_repo / ".bare", bare_repo / branch)
+    assert_worktree_gitdir_relative(bare_repo / branch)
+    assert git("symbolic-ref", "--short", "HEAD", cwd=bare_repo / branch).stdout.strip() == branch
+
+
+def test_add_from_local_picker_defaults_worktree_to_branch(wt, bare_repo):
+    branch = "bnorick/tools-copy"
+    git("branch", branch, "main", cwd=bare_repo / ".bare")
+
+    r = wt("add", "--from-local", cwd=bare_repo / "main", select=branch)
+
+    assert r.stdout.strip() == str(bare_repo / branch)
+    assert_worktree_gitdir_relative(bare_repo / branch)
+    assert git("symbolic-ref", "--short", "HEAD", cwd=bare_repo / branch).stdout.strip() == branch
+
+
+def test_add_from_local_direct_branch_defaults_worktree_to_branch(wt, bare_repo):
+    branch = "bnorick/tools-copy"
+    git("branch", branch, "main", cwd=bare_repo / ".bare")
+
+    r = wt("add", "--from-local", branch, cwd=bare_repo / "main")
+
+    assert r.stdout.strip() == str(bare_repo / branch)
+    assert_worktree_gitdir_relative(bare_repo / branch)
+    assert git("symbolic-ref", "--short", "HEAD", cwd=bare_repo / branch).stdout.strip() == branch

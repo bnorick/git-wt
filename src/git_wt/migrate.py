@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import signal
 import sys
@@ -24,6 +25,8 @@ _PRESERVED_PREFIXES = (
     "pull.",
     "rebase.",
     "rerere.",
+    "submodule.",
+    "wt.",
 )
 _PRESERVED_KEYS = {"core.hookspath", "user.email", "user.name"}
 
@@ -55,10 +58,14 @@ class _Plan:
     remotes: list[_Remote] = field(default_factory=list)
     configs: list[_ConfigEntry] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    nested_repos: list[tuple[Path, Path]] = field(default_factory=list)
+    git_markers: list[Path] = field(default_factory=list)
 
 
-def run(*, dry_run: bool) -> None:
+def run(*, dry_run: bool, fast: bool = False) -> None:
     plan = _build_plan()
+    if fast:
+        plan.warnings.append("FAST MODE: moves original files; no rollback on failure or interruption")
     _show_plan(plan)
 
     if dry_run:
@@ -73,9 +80,13 @@ def run(*, dry_run: bool) -> None:
     new_structure = plan.parent_dir / f"{plan.repo_name}-new-{pid}"
     temp_backup = plan.parent_dir / f"{plan.repo_name}-backup-{pid}"
 
-    with _cleanup_guard(new_structure, temp_backup):
-        _build_migrated(plan, new_structure)
-        _finalize(plan, new_structure, temp_backup)
+    with _cleanup_guard(new_structure, temp_backup, preserve_on_error=fast):
+        _build_migrated(plan, new_structure, fast=fast)
+        if fast:
+            with console.temporary_notice(_fast_recovery_notice(plan, new_structure, temp_backup)):
+                _finalize_fast(plan, new_structure, temp_backup)
+        else:
+            _finalize(plan, new_structure, temp_backup)
 
     _show_result(plan)
 
@@ -99,10 +110,7 @@ def _build_plan() -> _Plan:
         console.error(".git is not a directory — repository may already be in bare layout")
         sys.exit(1)
 
-    # No submodules
-    if (repo_root / ".gitmodules").exists():
-        console.error("submodules are not supported for migration")
-        sys.exit(1)
+    nested_repos, git_markers = _collect_nested_repos(repo_root)
 
     # Only one worktree
     try:
@@ -180,7 +188,38 @@ def _build_plan() -> _Plan:
         remotes=remotes,
         configs=configs,
         warnings=warnings,
+        nested_repos=nested_repos,
+        git_markers=git_markers,
     )
+
+
+def _collect_nested_repos(root: Path) -> tuple[list[tuple[Path, Path]], list[Path]]:
+    """Find nested repositories and empty .git markers without traversing Git metadata."""
+    repos: list[tuple[Path, Path]] = []
+    markers: list[Path] = []
+    for directory, dirs, _files in os.walk(root):
+        dirs[:] = [name for name in dirs if name != ".git"]
+        path = Path(directory)
+        dot_git = path / ".git"
+        if path == root or not dot_git.exists():
+            continue
+        git_dir = dot_git
+        if dot_git.is_file():
+            # uv uses empty .git files to keep Git from discovering a parent
+            # repository inside its source cache. These are not gitdir pointers.
+            if dot_git.stat().st_size == 0:
+                markers.append(dot_git.relative_to(root))
+                continue
+            content = dot_git.read_text().strip()
+            if not content.startswith("gitdir:"):
+                console.error(f"invalid nested repository pointer: {dot_git}")
+                sys.exit(1)
+            git_dir = (path / content[len("gitdir:") :].strip()).resolve()
+        if not git_dir.is_relative_to(root) or not git_dir.is_dir() or (git_dir / "commondir").exists():
+            console.error(f"nested repository {path} has external or linked Git metadata — migration not supported")
+            sys.exit(1)
+        repos.append((path.relative_to(root), git_dir.relative_to(root)))
+    return repos, markers
 
 
 def _collect_remotes() -> list[_Remote]:
@@ -332,7 +371,7 @@ def _sync_working_tree(src: Path, dst: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_migrated(plan: _Plan, new_dir: Path) -> None:
+def _build_migrated(plan: _Plan, new_dir: Path, *, fast: bool = False) -> None:
     bare = new_dir / ".bare"
 
     def _step_clone(write):
@@ -364,20 +403,25 @@ def _build_migrated(plan: _Plan, new_dir: Path) -> None:
                 _fsutil.copy_file(src, dst)
 
     def _step_worktrees(write):
-        _create_migration_worktrees(plan, new_dir)
+        _create_migration_worktrees(plan, new_dir, fast=fast)
 
     def _step_restore(write):
+        if fast:
+            return
         # Find the current branch worktree path
         wt_path = new_dir / plan.current_branch
         if not wt_path.exists():
             return
         _sync_working_tree(plan.repo_root, wt_path)
+        _restore_nested_repos(plan, wt_path)
+        # Sync excludes .git entries; restore cache markers as ordinary files.
+        for marker in plan.git_markers:
+            _fsutil.copy_file(plan.repo_root / marker, wt_path / marker)
         # Copy index to preserve staged changes
         old_index = plan.repo_root / ".git" / "index"
         if old_index.exists():
             # Find the worktree index in the new bare
-            wt_id = plan.current_branch
-            new_index = bare / "worktrees" / wt_id / "index"
+            new_index = Path(_git.query("rev-parse", "--absolute-git-dir", dir=wt_path)) / "index"
             if new_index.parent.exists():
                 _fsutil.copy_file(old_index, new_index)
 
@@ -387,10 +431,58 @@ def _build_migrated(plan: _Plan, new_dir: Path) -> None:
         console.Step("Fetching all remotes", raw_output=True, run=_step_fetch),
         console.Step("Migrating stashes", run=_step_stashes),
         console.Step("Creating worktrees", run=_step_worktrees),
-        console.Step("Restoring working directory", run=_step_restore),
     ]
+    if not fast:
+        steps.append(console.Step("Restoring working directory", run=_step_restore))
 
     console.run_steps(steps)
+
+
+def _restore_nested_repos(plan: _Plan, wt_path: Path, *, move: bool = False) -> None:
+    """Preserve module object stores, indexes, refs, and relocatable links."""
+    admin = Path(_git.query("rev-parse", "--absolute-git-dir", dir=wt_path))
+    old_git = plan.repo_root / ".git"
+
+    def destination(relative: Path) -> Path:
+        if relative.parts[0] == ".git":
+            return admin / relative.relative_to(".git")
+        return wt_path / relative
+
+    modules = old_git / "modules"
+    if modules.is_dir():
+        if move:
+            modules.rename(admin / "modules")
+        else:
+            _fsutil.copy_dir(modules, admin / "modules")
+    for relative_path, relative_git in plan.nested_repos:
+        src = plan.repo_root / relative_path / ".git"
+        dst = wt_path / relative_path / ".git"
+        git_dir = destination(relative_git)
+        if move and dst.is_dir():
+            continue  # Embedded Git metadata moved with the working directory.
+        if not move and src.is_dir():
+            _fsutil.copy_dir(src, dst)
+        else:
+            dst.write_text(f"gitdir: {os.path.relpath(git_dir, dst.parent)}\n")
+
+    # Include deinitialized modules: their stores still contain local history.
+    configs = list((admin / "modules").rglob("config")) if (admin / "modules").is_dir() else []
+    configs.extend(destination(git_dir) / "config" for _, git_dir in plan.nested_repos)
+    for config in set(configs):
+        try:
+            worktree = _git.query_silent("config", "--file", str(config), "core.worktree")
+        except _git.GitError:
+            continue
+        relative_git = config.parent.relative_to(admin) if config.is_relative_to(admin) else None
+        old_dir = (
+            old_git / relative_git if relative_git is not None else plan.repo_root / config.parent.relative_to(wt_path)
+        )
+        old_worktree = (old_dir / worktree).resolve()
+        if not old_worktree.is_relative_to(plan.repo_root):
+            console.error(f"nested repository worktree outside repository: {old_worktree}")
+            sys.exit(1)
+        new_worktree = wt_path / old_worktree.relative_to(plan.repo_root)
+        _git.run("config", "--file", str(config), "core.worktree", os.path.relpath(new_worktree, config.parent))
 
 
 def _configure_bare(bare: Path) -> None:
@@ -462,20 +554,22 @@ def _cleanup_local_branch_refs(bare: Path) -> None:
         pass
 
 
-def _create_migration_worktrees(plan: _Plan, new_dir: Path) -> None:
+def _create_migration_worktrees(plan: _Plan, new_dir: Path, *, fast: bool = False) -> None:
     bare = new_dir / ".bare"
 
     def _create(branch: str) -> None:
         wt_path = new_dir / branch
         source = _resolve_source_ref(plan, bare, branch)
+        options = ["--no-checkout"] if fast and branch == plan.current_branch else []
         try:
             if source and source != branch:
-                _git.run("worktree", "add", "-B", branch, str(wt_path), source, dir=bare)
+                _git.run("worktree", "add", *options, "-B", branch, str(wt_path), source, dir=bare)
             else:
-                _git.run("worktree", "add", branch, str(wt_path), dir=bare)
+                _git.run("worktree", "add", *options, branch, str(wt_path), dir=bare)
         except _git.GitError:
             with suppress(_git.GitError):
-                _git.run("worktree", "add", "-b", branch, str(wt_path), dir=bare)
+                _git.run("worktree", "add", *options, "-b", branch, str(wt_path), dir=bare)
+        _fsutil.relativize_worktree_gitdir(wt_path)
 
     if plan.default_branch == plan.current_branch:
         _create(plan.current_branch)
@@ -507,6 +601,55 @@ def _resolve_source_ref(plan: _Plan, bare: Path, branch: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Finalize (atomic swap)
 # ---------------------------------------------------------------------------
+
+
+def _fast_recovery_notice(plan: _Plan, new_dir: Path, temp_backup: Path) -> str:
+    root = plan.repo_root
+    partial = new_dir / plan.current_branch
+    recovery = (
+        f"find {shlex.quote(str(partial))} -mindepth 1 -maxdepth 1 ! -name .git "
+        f"-exec mv -i -- {{}} {shlex.quote(str(root) + '/')} \\;"
+    )
+    return (
+        "Fast migration recovery locations (keep until migration completes):\n"
+        f"  Original root: {root}\n"
+        f"  Working files: {partial} (later {root / plan.current_branch})\n"
+        f"  Original Git metadata: {root / '.git'} (later {temp_backup / '.git'})\n"
+        f"  New Git metadata: {new_dir / '.bare'} (later {root / '.bare'})\n"
+        "If interrupted during the initial content moves, before Git metadata changes,\n"
+        "move the partial contents back, including dotfiles but excluding the generated .git:\n"
+        f"  {recovery}\n"
+        "For later failures, inspect all locations with ls -la first; the index and\n"
+        "submodule metadata may also have moved. No automatic rollback is performed."
+    )
+
+
+def _finalize_fast(plan: _Plan, new_dir: Path, temp_backup: Path) -> None:
+    """Adopt original files with renames, preserving the root inode, without rollback."""
+    root = plan.repo_root
+    if root.stat().st_dev != new_dir.stat().st_dev:
+        console.error("--fast requires the repository and staging directory on the same filesystem")
+        sys.exit(1)
+    wt_path = new_dir / plan.current_branch
+    console.info("Moving original working directory (--fast, no rollback)...")
+    for item in list(root.iterdir()):
+        if item.name != ".git":
+            item.rename(wt_path / item.name)
+
+    _restore_nested_repos(plan, wt_path, move=True)
+    old_index = root / ".git" / "index"
+    if old_index.exists():
+        admin = Path(_git.query("rev-parse", "--absolute-git-dir", dir=wt_path))
+        old_index.rename(admin / "index")
+
+    temp_backup.mkdir()
+    (root / ".git").rename(temp_backup / ".git")
+    for item in list(new_dir.iterdir()):
+        item.rename(root / item.name)
+    _repair_worktree_paths(root)
+    _git.query("rev-parse", "--show-toplevel", dir=root / plan.current_branch)
+    new_dir.rmdir()
+    shutil.rmtree(temp_backup)
 
 
 def _finalize(plan: _Plan, new_dir: Path, temp_backup: Path) -> None:
@@ -575,6 +718,9 @@ def _repair_worktree_paths(root: Path) -> None:
     for wt_admin in worktrees_dir.iterdir():
         if not wt_admin.is_dir():
             continue
+        pointer = Path((wt_admin / "gitdir").read_text().strip())
+        if not pointer.is_absolute() and (wt_admin / pointer).is_file():
+            continue
         new_wt_path = root / wt_admin.name
         if not new_wt_path.is_dir():
             continue
@@ -590,7 +736,7 @@ def _repair_worktree_paths(root: Path) -> None:
 
 
 @contextmanager
-def _cleanup_guard(new_dir: Path, temp_backup: Path):
+def _cleanup_guard(new_dir: Path, temp_backup: Path, *, preserve_on_error: bool = False):
     success = False
     original_sigint = signal.getsignal(signal.SIGINT)
     original_sigterm = signal.getsignal(signal.SIGTERM)
@@ -600,6 +746,11 @@ def _cleanup_guard(new_dir: Path, temp_backup: Path):
         sys.exit(1)
 
     def _do_cleanup():
+        if preserve_on_error:
+            console.error(
+                f"Fast migration did not complete; no rollback performed. Inspect {new_dir} and {temp_backup} as well as the repository; original files may be split between them. No failure cleanup was performed."
+            )
+            return
         if new_dir.exists():
             shutil.rmtree(str(new_dir), ignore_errors=True)
         if temp_backup.exists():

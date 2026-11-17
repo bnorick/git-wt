@@ -9,15 +9,16 @@ import re
 import sys
 import time
 from collections.abc import Callable
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field
 from getpass import getpass
 from typing import Any, TextIO
 
 from rich import box as rich_box
 from rich.console import Console
+from rich.live import Live
 from rich.table import Table
-from rich.text import TextType
+from rich.text import Text, TextType
 
 try:
     import readline  # noqa: F401 -- importing installs Python's line editor
@@ -118,6 +119,21 @@ def can_render_selection() -> bool:
 def print(*args: Any, **kwargs: Any) -> None:
     """Print to stderr using Rich formatting."""
     _console.print(*args, **kwargs)
+
+
+@contextmanager
+def temporary_notice(message: str):
+    """Show a notice until success, retaining it on failure and in redirected logs."""
+    if not is_interactive():
+        _console.print(message, markup=False, highlight=False)
+        yield
+        return
+    try:
+        with Live(Text(message), console=_console, transient=True, auto_refresh=False):
+            yield
+    except BaseException:
+        _console.print(message, markup=False, highlight=False)
+        raise
 
 
 # ---------------------------------------------------------------------------

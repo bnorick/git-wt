@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0
+
+### Added
+
+- Added `migrate --fast` to move original top-level contents without copying or
+  checking out the current branch, preserving the repository root inode. Fast
+  mode has no rollback; partial migration data is retained on failure.
+
+### Changed
+- `add --from-local [BRANCH]` now defaults the worktree path to the selected
+  branch and reuses that branch when the names match.
+
+### Fixed
+
+- Ported migration support for initialized, nested, and deinitialized submodules,
+  preserving local history, working state, configuration, and relative links.
+  External or linked nested Git metadata is rejected before migration.
+- Preserved empty `.git` cache markers, including those created by uv.
+- Preserved repository lifecycle hook configuration during migration.
+- Corrected migration index lookup for namespaced branches and retained valid
+  relative worktree pointers during finalization.
+- Updated `doctor` to allow submodule migration and corrected text list rendering
+  for continuation and blank lines.
+
 ## 0.5.0
 
 ### Added
