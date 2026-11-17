@@ -105,8 +105,10 @@ def absolutize_worktree_gitdir(wt_path: Path) -> None:
     if not admin_path.is_dir():
         return
     abs_dot_git = dot_git.resolve()
-    write_pointer(dot_git, f"gitdir: {admin_path}\n")
-    write_pointer(admin_path / "gitdir", f"{abs_dot_git}\n")
+    # Git parses these pointers with forward-slash semantics even on Windows:
+    # a native path ending in `\.git` is not recognized as a worktree suffix.
+    write_pointer(dot_git, f"gitdir: {admin_path.as_posix()}\n")
+    write_pointer(admin_path / "gitdir", f"{abs_dot_git.as_posix()}\n")
 
 
 def delete_worktree_admin(wt_path: Path, bare: Path) -> bool:
@@ -159,6 +161,6 @@ def relativize_worktree_gitdir(wt_path: Path) -> None:
         return
     gitdir_file = admin_path / "gitdir"
     # Write admin record's gitdir relative to the admin directory itself.
-    write_pointer(gitdir_file, f"{dot_git.relative_to(admin_path, walk_up=True)}\n")
+    write_pointer(gitdir_file, f"{dot_git.relative_to(admin_path, walk_up=True).as_posix()}\n")
     # Write worktree's .git back-pointer relative to the worktree dir.
-    write_pointer(dot_git, f"gitdir: {admin_path.relative_to(wt_path, walk_up=True)}\n")
+    write_pointer(dot_git, f"gitdir: {admin_path.relative_to(wt_path, walk_up=True).as_posix()}\n")

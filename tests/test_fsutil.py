@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from git_wt._fsutil import relativize_worktree_gitdir, rmtree
+from git_wt._fsutil import absolutize_worktree_gitdir, relativize_worktree_gitdir, rmtree
 
 
 def _make_worktree_structure(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -122,3 +122,24 @@ class TestRelativizeWorktreeGitdir:
         wt.mkdir()
         (wt / ".git").write_text("not a gitdir pointer\n")
         relativize_worktree_gitdir(wt)  # should not raise
+
+
+class TestGitdirPointerSeparators:
+    def test_relativize_writes_forward_slashes(self, tmp_path):
+        """Git only strips a `/.git` suffix, so pointers must use forward slashes."""
+        wt, admin, dot_git = _make_worktree_structure(tmp_path)
+
+        relativize_worktree_gitdir(wt)
+
+        assert "\\" not in dot_git.read_text()
+        assert "\\" not in (admin / "gitdir").read_text()
+
+    def test_absolutize_writes_forward_slashes(self, tmp_path):
+        wt, admin, dot_git = _make_worktree_structure(tmp_path)
+        relativize_worktree_gitdir(wt)
+
+        absolutize_worktree_gitdir(wt)
+
+        assert "\\" not in dot_git.read_text()
+        assert "\\" not in (admin / "gitdir").read_text()
+        assert (admin / "gitdir").read_text().strip() == (wt / ".git").as_posix()

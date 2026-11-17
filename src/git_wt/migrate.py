@@ -463,7 +463,8 @@ def _restore_nested_repos(plan: _Plan, wt_path: Path, *, move: bool = False) -> 
         if not move and src.is_dir():
             _fsutil.copy_dir(src, dst)
         else:
-            _fsutil.write_pointer(dst, f"gitdir: {os.path.relpath(git_dir, dst.parent)}\n")
+            relative_gitdir = Path(os.path.relpath(git_dir, dst.parent)).as_posix()
+            _fsutil.write_pointer(dst, f"gitdir: {relative_gitdir}\n")
 
     # Include deinitialized modules: their stores still contain local history.
     configs = list((admin / "modules").rglob("config")) if (admin / "modules").is_dir() else []
@@ -743,8 +744,8 @@ def _repair_worktree_paths(root: Path) -> None:
         if not new_wt_path.is_dir():
             continue
         # Write absolute paths first so relativize_worktree_gitdir can find the admin dir.
-        _fsutil.write_pointer(wt_admin / "gitdir", str(new_wt_path / ".git") + "\n")
-        _fsutil.write_pointer(new_wt_path / ".git", f"gitdir: {wt_admin}\n")
+        _fsutil.write_pointer(wt_admin / "gitdir", (new_wt_path / ".git").as_posix() + "\n")
+        _fsutil.write_pointer(new_wt_path / ".git", f"gitdir: {wt_admin.as_posix()}\n")
         _fsutil.relativize_worktree_gitdir(new_wt_path)
 
 

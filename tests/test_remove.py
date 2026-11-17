@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from conftest import (
+    _rmtree,
     assert_branch_exists,
     assert_branch_not_exists,
     assert_worktree_gitdir_relative,
@@ -120,9 +121,7 @@ def test_remove_stale_filter(wt, bare_repo):
     create_branch(bare_repo, "stale-branch")
     wt_path = create_worktree(bare_repo, "stale-branch")
     # Simulate a stale worktree by removing the directory manually
-    import shutil
-
-    shutil.rmtree(str(wt_path))
+    _rmtree(wt_path)
 
     r = wt(
         "remove", "--stale", "--dry-run", cwd=bare_repo / "main", select=str(wt_path), input="cleanup\n", check=False
@@ -218,11 +217,9 @@ def test_remove_dry_run_remote_branches_preserved_message(wt, bare_repo):
 
 def test_remove_stale_preserves_branch(wt, bare_repo):
     """--stale removes a stale worktree entry but keeps its branch."""
-    import shutil as _shutil
-
     create_branch(bare_repo, "stale-keep")
     wt_path = create_worktree(bare_repo, "stale-keep")
-    _shutil.rmtree(str(wt_path))  # make it stale
+    _rmtree(wt_path)  # make it stale
 
     wt("remove", "--stale", cwd=bare_repo / "main", select=str(wt_path), input="cleanup\n")
 

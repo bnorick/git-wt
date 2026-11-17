@@ -185,7 +185,7 @@ def current_root(dir: Path | None = None) -> Path:
 def workspace_name(entry: Entry, root: Path) -> str:
     """Relative path of this worktree from the bare root (preserves slash paths)."""
     try:
-        return str(Path(entry.path).relative_to(root))
+        return Path(entry.path).relative_to(root).as_posix()
     except ValueError:
         return Path(entry.path).name
 
@@ -196,14 +196,14 @@ def display_path(path: str, root: Path | None = None) -> str:
     if root is not None:
         try:
             rel = p.relative_to(root)
-            return "./" + str(rel)
+            return "./" + rel.as_posix()
         except ValueError:
             pass
     home = Path.home()
     try:
-        return "~/" + str(p.relative_to(home))
+        return "~/" + p.relative_to(home).as_posix()
     except ValueError:
-        return str(p)
+        return p.as_posix()
 
 
 def resolve(entries: list[Entry], input: str, root: Path | None = None) -> Entry:
