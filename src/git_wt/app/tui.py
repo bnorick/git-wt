@@ -7,6 +7,7 @@ import os
 import shlex
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar
 
 import duct
@@ -307,8 +308,16 @@ def run(config: PickerConfig) -> list[Item]:
     select_env = os.environ.get("GIT_WT_SELECT", "")
     if select_env:
         values = {v.strip() for v in select_env.split(",") if v.strip()}
+        # A path can be written with either separator on Windows, so compare
+        # those as paths rather than as raw strings.
+        path_values = [Path(value) for value in values]
         return [
-            it for it in config.items if it.value in values or it.label in values or f"{it.label} [{it.desc}]" in values
+            it
+            for it in config.items
+            if it.value in values
+            or it.label in values
+            or f"{it.label} [{it.desc}]" in values
+            or Path(it.value) in path_values
         ]
 
     if not can_render_selection():
