@@ -13,8 +13,10 @@ for creating worktrees.  Worktrees are always created via ``wt("add", ...)``.
 from __future__ import annotations
 
 import shutil
+from pathlib import Path
 
 from conftest import (
+    _rmtree,
     assert_branch_not_exists,
     assert_worktree_gitdir_relative,
     assert_worktree_not_exists,
@@ -170,7 +172,7 @@ def test_add_then_switch(wt, wt_bare_repo):
 
     r = wt("switch", cwd=wt_bare_repo / "main", select=str(wt_bare_repo / "switchable"))
     assert r.returncode == 0
-    assert r.stdout.strip() == str(wt_bare_repo / "switchable")
+    assert Path(r.stdout.strip()) == wt_bare_repo / "switchable"
 
 
 def test_add_work_then_remove(wt, wt_bare_repo):
@@ -244,7 +246,7 @@ def test_remove_stale_workflow(wt, wt_bare_repo):
     wt("add", "-b", "stale-branch", str(wt_bare_repo / "stale-branch"), cwd=wt_bare_repo / "main")
 
     # Simulate a stale worktree by removing the directory
-    shutil.rmtree(str(wt_bare_repo / "stale-branch"))
+    _rmtree(wt_bare_repo / "stale-branch")
 
     r = wt("remove", "--stale", cwd=wt_bare_repo / "main", select=str(wt_bare_repo / "stale-branch"), input="cleanup\n")
 
@@ -265,7 +267,7 @@ def test_remove_sweep_mixed_states(wt, wt_bare_repo_with_remote):
 
     # stale-branch: delete the directory
     wt("add", "-b", "sweep-stale", str(repo / "sweep-stale"), cwd=repo / "main")
-    shutil.rmtree(str(repo / "sweep-stale"))
+    _rmtree(repo / "sweep-stale")
 
     r = wt("remove", "--sweep", "--dry-run", cwd=repo / "main", input="cleanup\n")
 

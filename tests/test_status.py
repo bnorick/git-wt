@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from conftest import create_branch, create_worktree
+from conftest import _rmtree, create_branch, create_worktree
 
 
 def test_status_shows_worktrees(wt, bare_repo):
@@ -60,11 +60,9 @@ def test_status_detached_head(wt, bare_repo):
 
 def test_status_error_count_in_summary(wt, bare_repo):
     """Stale worktree increments the error count in the summary line."""
-    import shutil as _shutil
-
     create_branch(bare_repo, "stale-stat")
     wt_path = create_worktree(bare_repo, "stale-stat")
-    _shutil.rmtree(str(wt_path))  # make it stale/error
+    _rmtree(wt_path)  # make it stale/error
 
     r = wt("status", cwd=bare_repo / "main")
     assert r.returncode == 0

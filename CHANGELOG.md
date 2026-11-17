@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.1
+
+### Fixed
+
+- Remove migration staging and backup directories on Windows instead of
+  leaving `<repo>-backup-<pid>` siblings behind. Cleanup clears only the
+  owner-write bit Git sets on objects, refuses to delete anything but the
+  repository's own `<name>-new-<pid>` and `<name>-backup-<pid>` siblings, and
+  warns with the leftover path instead of reporting success when removal
+  still fails.
+- Write `gitdir` pointers with forward slashes, which Git for Windows requires
+  to recognize a linked worktree. Previously `remove` failed with "is not a
+  working tree" and left the worktree behind.
+- Report worktree names and display paths with slashes so slash-separated
+  branch namespaces survive on Windows.
+- Exit non-zero when `git wt remove` cannot remove a worktree; lifecycle hook
+  failures remain reported without failing the command.
+- Write UTF-8 to pipes so status glyphs and table borders survive a non-UTF-8
+  Windows console code page.
+- Match native `git worktree list` column widths and path separators when
+  rendering `git wt list` output.
+
 ## 0.7.0
 
 ### Fixed

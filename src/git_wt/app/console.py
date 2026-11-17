@@ -9,7 +9,7 @@ import re
 import sys
 import time
 from collections.abc import Callable
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager, redirect_stdout, suppress
 from dataclasses import dataclass, field
 from getpass import getpass
 from typing import Any, TextIO
@@ -84,9 +84,22 @@ _console = ReadlineConsole(stderr=True)
 def init(debug: bool = False) -> None:
     """Initialize console for the session."""
     global _console
+    _use_utf8_pipes()
     if not is_interactive():
         # Use a wide console so table columns are never truncated when piped
         _console = ReadlineConsole(stderr=True, no_color=True, width=32768)
+
+
+def _use_utf8_pipes() -> None:
+    """Write UTF-8 to pipes so status glyphs survive a non-UTF-8 console code page."""
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None or stream.isatty():
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        with suppress(OSError, ValueError):
+            reconfigure(encoding="utf-8")
 
 
 def is_interactive() -> bool:

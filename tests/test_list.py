@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
-from conftest import create_branch, create_worktree, git
+from conftest import _rmtree, create_branch, create_worktree, git
 
 from git_wt import _worktree
 from git_wt.list import _relativize as _relativize_list
@@ -134,7 +133,7 @@ def test_list_model_clears_false_prunable(wt_bare_repo):
 def test_list_preserves_genuine_prunable_worktree(wt, wt_bare_repo):
     """A missing worktree remains prunable in every text format."""
     main = wt_bare_repo / "main"
-    shutil.rmtree(main)
+    _rmtree(main)
 
     for args in (("list",), ("list", "-v"), ("list", "--porcelain")):
         r = wt(*args, cwd=wt_bare_repo)

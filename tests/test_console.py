@@ -21,6 +21,7 @@ def test_console_input_passes_colored_prompt_to_readline(
         file=io.StringIO(),
         force_terminal=True,
         color_system="standard",
+        legacy_windows=False,
     )
     received_prompt = ""
 
@@ -53,7 +54,7 @@ def test_prompt_helpers_pass_the_complete_prompt_to_readline(
     answer: str,
     expected: object,
 ) -> None:
-    readline_console = console.ReadlineConsole(file=io.StringIO(), no_color=True)
+    readline_console = console.ReadlineConsole(file=io.StringIO(), no_color=True, legacy_windows=False)
     received_prompt = ""
 
     def fake_input(value: str) -> str:

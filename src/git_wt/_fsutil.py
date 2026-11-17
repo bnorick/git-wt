@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
+import stat
 from pathlib import Path
 
 
-def _write_pointer(path: Path, text: str) -> None:
+def write_pointer(path: Path, text: str) -> None:
     """Replace a pointer file without opening the existing file for writing.
 
     Git for Windows can deny in-place writes to a worktree's newly created
@@ -20,6 +22,32 @@ def _write_pointer(path: Path, text: str) -> None:
     except PermissionError:
         path.chmod(0o666)
         os.replace(tmp, path)
+
+
+def rmtree(path: Path, *, ignore_errors: bool = False) -> None:
+    """Remove a tree, clearing read-only attributes that block Windows cleanup.
+
+    Git marks objects read-only on Windows, which makes ``shutil.rmtree`` fail
+    with ``PermissionError``. Only the owner-write bit is restored before the
+    failed entry is retried, so this never broadens permissions that were not
+    written by Git.
+    """
+    resolved = path.resolve()
+    if resolved.parent == resolved:
+        raise ValueError(f"refusing to remove filesystem root: {path}")
+    if Path.cwd().resolve().is_relative_to(resolved):
+        raise ValueError(f"refusing to remove the current directory or an ancestor: {path}")
+
+    def _clear_and_retry(func, target, _error):
+        with contextlib.suppress(OSError):
+            os.chmod(target, os.stat(target).st_mode | stat.S_IWUSR)
+        func(target)
+
+    try:
+        shutil.rmtree(str(path), onexc=_clear_and_retry)
+    except OSError:
+        if not ignore_errors:
+            raise
 
 
 def copy_dir(src: Path, dst: Path, excludes: tuple[str, ...] = ()) -> None:
@@ -77,8 +105,10 @@ def absolutize_worktree_gitdir(wt_path: Path) -> None:
     if not admin_path.is_dir():
         return
     abs_dot_git = dot_git.resolve()
-    _write_pointer(dot_git, f"gitdir: {admin_path}\n")
-    _write_pointer(admin_path / "gitdir", f"{abs_dot_git}\n")
+    # Git parses these pointers with forward-slash semantics even on Windows:
+    # a native path ending in `\.git` is not recognized as a worktree suffix.
+    write_pointer(dot_git, f"gitdir: {admin_path.as_posix()}\n")
+    write_pointer(admin_path / "gitdir", f"{abs_dot_git.as_posix()}\n")
 
 
 def delete_worktree_admin(wt_path: Path, bare: Path) -> bool:
@@ -91,9 +121,12 @@ def delete_worktree_admin(wt_path: Path, bare: Path) -> bool:
     worktrees_dir = bare / "worktrees"
     if not worktrees_dir.is_dir():
         return False
+    worktrees_root = worktrees_dir.resolve()
     target = (Path(wt_path) / ".git").resolve()
     for admin in worktrees_dir.iterdir():
         if not admin.is_dir():
+            continue
+        if not admin.resolve().is_relative_to(worktrees_root):
             continue
         gitdir_file = admin / "gitdir"
         if not gitdir_file.is_file():
@@ -101,7 +134,7 @@ def delete_worktree_admin(wt_path: Path, bare: Path) -> bool:
         content = gitdir_file.read_text().strip()
         candidate = Path(content) if Path(content).is_absolute() else admin / content
         if candidate.resolve() == target:
-            shutil.rmtree(str(admin))
+            rmtree(admin)
             return True
     return False
 
@@ -128,6 +161,6 @@ def relativize_worktree_gitdir(wt_path: Path) -> None:
         return
     gitdir_file = admin_path / "gitdir"
     # Write admin record's gitdir relative to the admin directory itself.
-    _write_pointer(gitdir_file, f"{dot_git.relative_to(admin_path, walk_up=True)}\n")
+    write_pointer(gitdir_file, f"{dot_git.relative_to(admin_path, walk_up=True).as_posix()}\n")
     # Write worktree's .git back-pointer relative to the worktree dir.
-    _write_pointer(dot_git, f"gitdir: {admin_path.relative_to(wt_path, walk_up=True)}\n")
+    write_pointer(dot_git, f"gitdir: {admin_path.relative_to(wt_path, walk_up=True).as_posix()}\n")

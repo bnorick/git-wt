@@ -141,6 +141,7 @@ def run(
 
     # Execute
     ok = err = 0
+    failed = 0
 
     for item in to_remove:
         entry = item.entry
@@ -198,11 +199,14 @@ def run(
         except _git.GitError as exc:
             console.error(f"failed to remove {name}: {exc}")
             err += 1
+            failed += 1
 
     parts = [f"{ok} removed"]
     if err:
         parts.append(f"{err} failed")
     console.info(console.subtle(" · ".join(parts)))
+    if failed:
+        sys.exit(1)
 
 
 def _find_candidates(
