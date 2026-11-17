@@ -7,6 +7,21 @@ import shutil
 from pathlib import Path
 
 
+def _write_pointer(path: Path, text: str) -> None:
+    """Replace a pointer file without opening the existing file for writing.
+
+    Git for Windows can deny in-place writes to a worktree's newly created
+    .git file. Replacing it through a sibling temp file avoids that failure.
+    """
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text)
+    try:
+        os.replace(tmp, path)
+    except PermissionError:
+        path.chmod(0o666)
+        os.replace(tmp, path)
+
+
 def copy_dir(src: Path, dst: Path, excludes: tuple[str, ...] = ()) -> None:
     """Recursively copy src to dst, preserving symlinks and permissions.
 
@@ -62,8 +77,8 @@ def absolutize_worktree_gitdir(wt_path: Path) -> None:
     if not admin_path.is_dir():
         return
     abs_dot_git = dot_git.resolve()
-    dot_git.write_text(f"gitdir: {admin_path}\n")
-    (admin_path / "gitdir").write_text(f"{abs_dot_git}\n")
+    _write_pointer(dot_git, f"gitdir: {admin_path}\n")
+    _write_pointer(admin_path / "gitdir", f"{abs_dot_git}\n")
 
 
 def delete_worktree_admin(wt_path: Path, bare: Path) -> bool:
@@ -113,6 +128,6 @@ def relativize_worktree_gitdir(wt_path: Path) -> None:
         return
     gitdir_file = admin_path / "gitdir"
     # Write admin record's gitdir relative to the admin directory itself.
-    gitdir_file.write_text(f"{dot_git.relative_to(admin_path, walk_up=True)}\n")
+    _write_pointer(gitdir_file, f"{dot_git.relative_to(admin_path, walk_up=True)}\n")
     # Write worktree's .git back-pointer relative to the worktree dir.
-    dot_git.write_text(f"gitdir: {admin_path.relative_to(wt_path, walk_up=True)}\n")
+    _write_pointer(dot_git, f"gitdir: {admin_path.relative_to(wt_path, walk_up=True)}\n")

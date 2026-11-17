@@ -21,6 +21,14 @@ def _validate_worktree_name(path: str | Path) -> None:
         sys.exit(1)
 
 
+def _default_branch(worktree: str | Path) -> str:
+    """Derive a namespaced branch from a repo-relative worktree name."""
+    path = Path(worktree)
+    if path.is_absolute() or len(path.parts) < 2:
+        return ""
+    return path.as_posix()
+
+
 def _hook_context(worktree: Path, branch: str = "") -> _hooks.HookContext:
     """Build hook execution context for an adding worktree."""
     try:
@@ -151,7 +159,7 @@ def _run_from_local(worktree: str, source_branch: str) -> None:
 
     worktree = worktree or source_branch
     destination = Path(worktree)
-    new_branch = str(destination)
+    new_branch = destination.as_posix()
     _validate_worktree_name(destination)
 
     try:
@@ -453,9 +461,7 @@ def _run_direct(
     # basename(path) — yielding "test123" instead of "bnorick/test123". Auto-derive
     # the branch from the full relative path to preserve the namespace.
     if not branch and not force_branch and not detach and not commitish:
-        p = Path(worktree)
-        if not p.is_absolute() and len(p.parts) > 1:
-            branch = str(p)
+        branch = _default_branch(worktree)
 
     git_args = ["worktree", "add"]
     if branch:

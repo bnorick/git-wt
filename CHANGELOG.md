@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0
+
+### Fixed
+
+- Preserve slash-separated branch namespaces when deriving branch names from
+  multi-component worktree paths on Windows, including `add` and
+  `add --from-local`.
+- Replace worktree gitdir pointers atomically so Windows does not reject
+  in-place writes immediately after `git worktree add`.
+
 ## 0.6.0
 
 ### Added
